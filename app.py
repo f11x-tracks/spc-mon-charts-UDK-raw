@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from datetime import timedelta
+import numpy as np
 
 SQL_DATA = '''
 SELECT 
@@ -51,8 +52,8 @@ AND a4.spcs_id = a7.spcs_id AND a4.measurement_id = a7.measurement_id
 WHERE
  (a2.monitor_set_name Like '%DSA_PST_NONPAT.5051.MON' or a2.monitor_set_name Like '%DSA_PST.5051.MON')
  AND      a0.operation In ('8281','8333') 
- AND      a1.entity Like 'T%' 
- AND      a1.data_collection_time >= SYSDATE - 120  
+ AND      (a1.entity Like 'TZH591%' or a1.entity Like 'TBC611%')
+ AND      a1.data_collection_time >= SYSDATE - 270
 '''
 
 
@@ -103,24 +104,32 @@ app.layout = html.Div([
         labelStyle={'display': 'inline-block'}
     ),
     dcc.RadioItems(
-        id='y-axis-scale',  # New radio button for y-axis scaling
+        id='y-axis-scale',  # Radio button for y-axis scaling
         options=[
             {'label': 'Auto Scale', 'value': 'auto'},
-            {'label': 'Use Upper Limit', 'value': 'upper_limit'}
+            {'label': 'Use Upper Limit', 'value': 'upper_limit'},
+            {'label': 'Manual', 'value': 'manual'}  # New manual option
         ],
         value='auto',  # Default value
         labelStyle={'display': 'inline-block'}
     ),
+    dcc.Dropdown(
+        id='manual-y-limit',  # New dropdown for manual y-axis limit
+        options=[{'label': str(i), 'value': i} for i in range(15, 301, 15)],  # 15 to 300 in increments of 15
+        value=30,  # Default value
+        style={'width': '200px', 'display': 'inline-block', 'margin-left': '10px'}
+    ),
     html.Div(id='charts-container')  # Container for the charts
 ])
 
-# Callback to update charts based on radio button selection
+# Callback to update charts based on radio button and dropdown selection
 @app.callback(
     Output('charts-container', 'children'),
     [Input('only-valid', 'value'),
-     Input('y-axis-scale', 'value')]  # New input for y-axis scaling
+     Input('y-axis-scale', 'value'),
+     Input('manual-y-limit', 'value')]  # New input for manual y-axis limit
 )
-def update_charts(only_valid, y_axis_scale):
+def update_charts(only_valid, y_axis_scale, manual_y_limit):
     charts_by_resist = {}
     for resist in df['RESIST'].unique():
         # Filter data by resist
@@ -134,6 +143,8 @@ def update_charts(only_valid, y_axis_scale):
             defect_size_df = resist_df[resist_df['SPC_CHART_SUBSET'] == defect_size]
             # Sort data by ENTITY_DATA_COLLECT_DATE
             defect_size_df = defect_size_df.sort_values(by=['ENTITY_DATA_COLLECT_DATE', 'FOUP_SLOT'], ascending=[True, True])
+            # Add jitter to the y-axis (RAW_VALUE)
+            defect_size_df['RAW_VALUE'] = defect_size_df['RAW_VALUE'] + np.random.uniform(-0.2, 0.2, size=len(defect_size_df))  # Add jitter of ±0.2
             # Get the last entries for monitor set name, chart test name, and measurement set name
             last_monitor_set_name = defect_size_df['MONITOR_SET_NAME'].iloc[-1]
             last_chart_test_name = defect_size_df['CHART_TEST_NAME'].iloc[-1]
@@ -144,13 +155,6 @@ def update_charts(only_valid, y_axis_scale):
             upper_limit = 2 * defect_size_df['UP_CONTROL_LMT'].iloc[-1]
             # Get the center line value
             center_line = defect_size_df['CENTERLINE'].iloc[-1]
-            # Create the line chart
-            fig = px.line(defect_size_df, x='ENTITY_DATA_COLLECT_DATE', y='RAW_VALUE', title=title, color='ENTITY')
-            # Add a horizontal line for the upper control limit
-            fig.add_hline(y=defect_size_df['UP_CONTROL_LMT'].iloc[-1], line_dash="dash", annotation_text="Upper Spec", line_color="red")
-            # Add a horizontal line for the center line if it exists
-            if pd.notna(center_line) and center_line != '':
-                fig.add_hline(y=center_line, line_dash="dash", annotation_text="Center Line")
             # Create hover text for each data point and add it as a column in the DataFrame
             defect_size_df['hovertext'] = defect_size_df.apply(
                 lambda row: (
@@ -164,59 +168,79 @@ def update_charts(only_valid, y_axis_scale):
                 axis=1
             )
             # Map VALID column to symbols
-            valid_symbols = defect_size_df['VALID'].map({'Y': 'circle', 'N': 'x'})
-            # Create the line chart with hovertext
-            fig = px.line(
-                defect_size_df,
-                x='ENTITY_DATA_COLLECT_DATE',
-                y='RAW_VALUE',
-                title=title,
-                color='ENTITY',  # Group by ENTITY
-                hover_data={'hovertext': True},  # Include the hovertext column
-            )
-
+            valid_symbols = defect_size_df['VALID'].map({'Y': 'circle', 'N': 'x'})            
+            # Create the line chart
+            fig = px.scatter(defect_size_df, x='ENTITY_DATA_COLLECT_DATE', y='RAW_VALUE', title=title, color='ENTITY', custom_data=['hovertext'])
             # Add a horizontal line for the upper control limit
-            fig.add_hline(
-                y=defect_size_df['UP_CONTROL_LMT'].iloc[-1],
-                line_dash="dash",
-                annotation_text="Upper Spec",
-                line_color="red"
-            )
-
+            fig.add_hline(y=defect_size_df['UP_CONTROL_LMT'].iloc[-1], line_dash="dash", annotation_text="Upper Spec", line_color="red")
             # Add a horizontal line for the center line if it exists
             if pd.notna(center_line) and center_line != '':
-                fig.add_hline(
-                    y=center_line,
-                    line_dash="dash",
-                    annotation_text="Center Line"
-                )
+                fig.add_hline(y=center_line, line_dash="dash", annotation_text="Center Line")
+
+            # Create the line chart with hovertext
+            #fig = px.line(
+            #    defect_size_df,
+            #    x='ENTITY_DATA_COLLECT_DATE',
+            #    y='RAW_VALUE',
+            #    title=title,
+            #    color='ENTITY',  # Group by ENTITY
+            #    hover_data={'hovertext': True},  # Include the hovertext column
+            #)
+
+            # Add a horizontal line for the upper control limit
+            #fig.add_hline(
+            #    y=defect_size_df['UP_CONTROL_LMT'].iloc[-1],
+            #    line_dash="dash",
+            #    annotation_text="Upper Spec",
+            #    line_color="red"
+            #)
+
+            # Add a horizontal line for the center line if it exists
+            #if pd.notna(center_line) and center_line != '':
+            #    fig.add_hline(
+            #        y=center_line,
+            #        line_dash="dash",
+            #        annotation_text="Center Line"
+            #    )
 
             # Add markers to the line chart
             fig.update_traces(
                 mode='markers',  # Add both lines and markers
-                marker=dict(symbol=valid_symbols)  # Use the VALID column for marker symbols
+                #marker=dict(symbol=valid_symbols)  # Use the VALID column for marker symbols
+                marker=dict(symbol=[sym for sym in valid_symbols]),  # Convert pandas Series to list
+                hovertemplate='%{customdata[0]}<extra></extra>'  # Use custom hover text and remove the trace info
             )
 
             # Update the layout with the y-axis range based on the selected scaling mode
             if y_axis_scale == 'upper_limit':
-                fig.update_layout(
-                    yaxis_range=[0, upper_limit],  # Use explicit upper limit
-                )
-            else:
-                fig.update_layout(
-                    yaxis_autorange=True  # Enable auto-scaling
-                )
+                fig.update_layout(yaxis_range=[0, upper_limit])
+            elif y_axis_scale == 'manual':
+                fig.update_layout(yaxis_range=[0, manual_y_limit])
+            else:  # auto
+                fig.update_layout(yaxis_autorange=True)
 
             # Update the layout with a transparent hover box
             fig.update_layout(
-                hovermode="x unified",  # Ensure hovertext is unified across the x-axis
+                hovermode="closest",
                 hoverlabel=dict(
-                    bgcolor="rgba(255, 255, 255, 0.33)",  # 33% Transparent background
+                    bgcolor="rgba(255, 255, 255, 0.33)",
                     font_size=12,
                     font_color="black",
-                    bordercolor="rgba(0, 0, 0, 0)"  # Fully transparent border
-                )
+                    bordercolor="rgba(0, 0, 0, 0)"
+                ),
+                # Add these settings for better zoom control
+                xaxis=dict(
+                    autorange=True,
+                    rangeslider=dict(visible=False)  # Optional: adds a range slider
+                ),
+                yaxis=dict(
+                    fixedrange=False  # Allows y-axis zooming
+                ),
+                # Enable zoom controls
+                dragmode='zoom',  # Default drag mode for zooming
+                showlegend=True
             )
+
             # Append the chart to the list
             charts.append(dcc.Graph(figure=fig))
         # Store the charts by resist

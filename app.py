@@ -52,8 +52,8 @@ AND a4.spcs_id = a7.spcs_id AND a4.measurement_id = a7.measurement_id
 WHERE
  (a2.monitor_set_name Like '%DSA_PST_NONPAT.5051.MON' or a2.monitor_set_name Like '%DSA_PST.5051.MON')
  AND      a0.operation In ('8281','8333') 
- AND      (a1.entity Like 'TZH591%' or a1.entity Like 'TBC611%')
- AND      a1.data_collection_time >= SYSDATE - 270
+ AND      (a1.entity Like 'TBC611%' or a1.entity Like 'TZH591%')
+ AND      a1.data_collection_time >= SYSDATE - 210
 '''
 
 
@@ -167,49 +167,14 @@ def update_charts(only_valid, y_axis_scale, manual_y_limit):
                 ),
                 axis=1
             )
-            # Map VALID column to symbols
-            valid_symbols = defect_size_df['VALID'].map({'Y': 'circle', 'N': 'x'})            
-            # Create the line chart
-            fig = px.scatter(defect_size_df, x='ENTITY_DATA_COLLECT_DATE', y='RAW_VALUE', title=title, color='ENTITY', custom_data=['hovertext'])
+            # Create the box plot
+            fig = px.box(defect_size_df, x='ENTITY', y='RAW_VALUE', title=title, color='ENTITY')
+            
             # Add a horizontal line for the upper control limit
             fig.add_hline(y=defect_size_df['UP_CONTROL_LMT'].iloc[-1], line_dash="dash", annotation_text="Upper Spec", line_color="red")
             # Add a horizontal line for the center line if it exists
             if pd.notna(center_line) and center_line != '':
                 fig.add_hline(y=center_line, line_dash="dash", annotation_text="Center Line")
-
-            # Create the line chart with hovertext
-            #fig = px.line(
-            #    defect_size_df,
-            #    x='ENTITY_DATA_COLLECT_DATE',
-            #    y='RAW_VALUE',
-            #    title=title,
-            #    color='ENTITY',  # Group by ENTITY
-            #    hover_data={'hovertext': True},  # Include the hovertext column
-            #)
-
-            # Add a horizontal line for the upper control limit
-            #fig.add_hline(
-            #    y=defect_size_df['UP_CONTROL_LMT'].iloc[-1],
-            #    line_dash="dash",
-            #    annotation_text="Upper Spec",
-            #    line_color="red"
-            #)
-
-            # Add a horizontal line for the center line if it exists
-            #if pd.notna(center_line) and center_line != '':
-            #    fig.add_hline(
-            #        y=center_line,
-            #        line_dash="dash",
-            #        annotation_text="Center Line"
-            #    )
-
-            # Add markers to the line chart
-            fig.update_traces(
-                mode='markers',  # Add both lines and markers
-                #marker=dict(symbol=valid_symbols)  # Use the VALID column for marker symbols
-                marker=dict(symbol=[sym for sym in valid_symbols]),  # Convert pandas Series to list
-                hovertemplate='%{customdata[0]}<extra></extra>'  # Use custom hover text and remove the trace info
-            )
 
             # Update the layout with the y-axis range based on the selected scaling mode
             if y_axis_scale == 'upper_limit':
@@ -219,7 +184,7 @@ def update_charts(only_valid, y_axis_scale, manual_y_limit):
             else:  # auto
                 fig.update_layout(yaxis_autorange=True)
 
-            # Update the layout with a transparent hover box
+            # Update the layout for box plots
             fig.update_layout(
                 hovermode="closest",
                 hoverlabel=dict(
@@ -228,10 +193,8 @@ def update_charts(only_valid, y_axis_scale, manual_y_limit):
                     font_color="black",
                     bordercolor="rgba(0, 0, 0, 0)"
                 ),
-                # Add these settings for better zoom control
                 xaxis=dict(
-                    autorange=True,
-                    rangeslider=dict(visible=False)  # Optional: adds a range slider
+                    title="ENTITY"
                 ),
                 yaxis=dict(
                     fixedrange=False  # Allows y-axis zooming

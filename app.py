@@ -10,6 +10,8 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from datetime import timedelta
 import numpy as np
+from scipy import stats
+from plotly.subplots import make_subplots
 
 SQL_DATA = '''
 SELECT 
@@ -167,14 +169,73 @@ def update_charts(only_valid, y_axis_scale, manual_y_limit):
                 ),
                 axis=1
             )
-            # Create the box plot
-            fig = px.box(defect_size_df, x='ENTITY', y='RAW_VALUE', title=title, color='ENTITY')
+            # Create subplots with 1 row and 2 columns (boxplot and cumulative probability plot)
+            fig = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=('', 'Cumulative Probability'),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}]]
+            )
             
-            # Add a horizontal line for the upper control limit
-            fig.add_hline(y=defect_size_df['UP_CONTROL_LMT'].iloc[-1], line_dash="dash", annotation_text="Upper Spec", line_color="red")
-            # Add a horizontal line for the center line if it exists
+            # Create the box plot
+            box_fig = px.box(defect_size_df, x='ENTITY', y='RAW_VALUE', color='ENTITY')
+            
+            # Add box plot traces to the first subplot
+            for trace in box_fig.data:
+                fig.add_trace(trace, row=1, col=1)
+            
+            # Add horizontal lines to the box plot
+            fig.add_hline(
+                y=defect_size_df['UP_CONTROL_LMT'].iloc[-1], 
+                line_dash="dash", 
+                annotation_text="Upper Spec", 
+                line_color="red",
+                row=1, col=1
+            )
             if pd.notna(center_line) and center_line != '':
-                fig.add_hline(y=center_line, line_dash="dash", annotation_text="Center Line")
+                fig.add_hline(
+                    y=center_line, 
+                    line_dash="dash", 
+                    annotation_text="Center Line",
+                    row=1, col=1
+                )
+            
+            # Add vertical line to ECDF plot for Upper Spec
+            upper_spec_value = defect_size_df['UP_CONTROL_LMT'].iloc[-1]
+            fig.add_trace(
+                go.Scatter(
+                    x=[upper_spec_value, upper_spec_value],
+                    y=[0, 100],
+                    mode='lines',
+                    line=dict(dash='dash', color='red', width=2),
+                    name='Upper Spec',
+                    showlegend=False
+                ),
+                row=1, col=2
+            )
+            
+            # Create empirical cumulative distribution plots for each entity
+            colors = px.colors.qualitative.Plotly
+            for i, entity in enumerate(defect_size_df['ENTITY'].unique()):
+                entity_data = defect_size_df[defect_size_df['ENTITY'] == entity]['RAW_VALUE'].dropna()
+                if len(entity_data) > 1:  # Need at least 2 points for ECDF
+                    # Sort the data
+                    sorted_data = np.sort(entity_data)
+                    # Calculate empirical cumulative probabilities (as percentages)
+                    cumulative_prob = np.arange(1, len(sorted_data) + 1) / len(sorted_data) * 100
+                    
+                    # Add ECDF trace
+                    fig.add_trace(
+                        go.Scatter(
+                            x=sorted_data,
+                            y=cumulative_prob,
+                            mode='lines+markers',
+                            name=f'{entity} (ECDF)',
+                            marker=dict(color=colors[i % len(colors)]),
+                            line=dict(color=colors[i % len(colors)]),
+                            showlegend=True
+                        ),
+                        row=1, col=2
+                    )
 
             # Update the layout with the y-axis range based on the selected scaling mode
             if y_axis_scale == 'upper_limit':
@@ -184,8 +245,9 @@ def update_charts(only_valid, y_axis_scale, manual_y_limit):
             else:  # auto
                 fig.update_layout(yaxis_autorange=True)
 
-            # Update the layout for box plots
+            # Update the layout for combined plots
             fig.update_layout(
+                title=title,
                 hovermode="closest",
                 hoverlabel=dict(
                     bgcolor="rgba(255, 255, 255, 0.33)",
@@ -193,27 +255,37 @@ def update_charts(only_valid, y_axis_scale, manual_y_limit):
                     font_color="black",
                     bordercolor="rgba(0, 0, 0, 0)"
                 ),
-                xaxis=dict(
-                    title="ENTITY"
-                ),
-                yaxis=dict(
-                    fixedrange=False  # Allows y-axis zooming
-                ),
                 # Enable zoom controls
-                dragmode='zoom',  # Default drag mode for zooming
-                showlegend=True
+                dragmode='zoom',
+                showlegend=True,
+                legend=dict(
+                    x=0.98,  # Position towards the right
+                    y=0.02,  # Position towards the bottom
+                    xanchor='right',
+                    yanchor='bottom',
+                    bgcolor='rgba(255, 255, 255, 0.8)',
+                    bordercolor='rgba(0, 0, 0, 0.2)',
+                    borderwidth=1
+                ),
+                height=500  # Adjust height for side-by-side plots
             )
+            
+            # Update x-axis and y-axis labels
+            fig.update_xaxes(title_text="ENTITY", row=1, col=1)
+            fig.update_xaxes(title_text="Defects/Wfr", row=1, col=2)
+            fig.update_yaxes(title_text="Defects/Wfr", row=1, col=1)
+            fig.update_yaxes(title_text="Cumulative Probability (%)", row=1, col=2)
 
             # Append the chart to the list
             charts.append(dcc.Graph(figure=fig))
         # Store the charts by resist
         charts_by_resist[resist] = charts
 
-    # Create the layout with 3 columns per row for each resist
+    # Create the layout with 6 columns per row for each resist
     layout = []
     for resist, charts in charts_by_resist.items():
-        # Group charts into rows of 3 columns
-        rows = [charts[i:i + 3] for i in range(0, len(charts), 3)]
+        # Group charts into rows of 6 columns
+        rows = [charts[i:i + 6] for i in range(0, len(charts), 6)]
         resist_section = html.Div([
             html.H3(f'Resist: {resist}'),  # Add a header for each resist
             html.Div([
